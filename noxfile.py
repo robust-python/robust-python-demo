@@ -45,16 +45,16 @@ RELEASE: str = "release"
 QUALITY: str = "quality"
 
 
-@nox.session(python=False, name="setup-git", tags=[ENV])
-def setup_git(session: Session) -> None:
-    """Set up the git repo for the current project."""
-    session.run("python", SCRIPTS_FOLDER / "setup-git.py", REPO_ROOT, external=True)
-
-
 @nox.session(python=False, name="setup-venv", tags=[ENV])
 def setup_venv(session: Session) -> None:
     """Set up the virtual environment for the current project."""
     session.run("python", SCRIPTS_FOLDER / "setup-venv.py", REPO_ROOT, "-p", PYTHON_VERSIONS[0], external=True)
+
+
+@nox.session(python=False, name="setup-git", tags=[ENV])
+def setup_git(session: Session) -> None:
+    """Set up the git repo for the current project."""
+    session.run("python", SCRIPTS_FOLDER / "setup-git.py", REPO_ROOT, external=True)
 
 
 @nox.session(python=False, name="setup-remote")
@@ -155,6 +155,21 @@ def docs_build(session: Session) -> None:
 
     session.log("Building documentation.")
     session.run("sphinx-build", "-b", "html", "docs", str(docs_build_dir), "-W")
+
+@nox.session(python=DEFAULT_PYTHON_VERSION, name="docs", tags=[DOCS, BUILD])
+def docs(session: Session) -> None:
+    """Build and serve the project documentation (Sphinx)."""
+    session.log("Installing documentation dependencies...")
+    session.install("-e", ".", "--group", "docs")
+
+    session.log(f"Building documentation with py{session.python}.")
+    docs_build_dir = Path("docs") / "_build" / "html"
+
+    session.log(f"Cleaning build directory: {docs_build_dir}")
+    session.run("sphinx-build", "-b", "html", "docs", str(docs_build_dir), "-E")
+
+    session.log("Building and serving documentation.")
+    session.run("sphinx-autobuild", "--open-browser", "docs", str(docs_build_dir))
 
 
 @nox.session(python=False, name="build-python", tags=[BUILD])

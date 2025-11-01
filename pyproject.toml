@@ -1,6 +1,6 @@
 [project]
 name = "robust-python-demo"
-version = "0.27.0"
+version = "0.28.0"
 description = "robust-python-demo"
 authors = [
     { name = "Kyle Oliver", email = "56kyleoliver+cookiecutter-robust-python@gmail.com" },
@@ -40,6 +40,7 @@ docs = [
     "furo>=2024.8.6",
     "myst-parser>=3.0.1",
     "sphinx>=7.4.7",
+    "sphinx-autobuild>=2024.10.3",
     "sphinx-autodoc-typehints>=2.3.0",
     "sphinx-copybutton>=0.5.2",
     "sphinx-tabs>=3.4.7",
