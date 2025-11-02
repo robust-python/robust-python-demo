@@ -91,5 +91,5 @@ Distributed under the terms of the **MIT** license. See [LICENSE](LICENSE) for d
 
 <!-- Reference Links -->
 
-[cookiecutter-robust-python]: https://github.com/robust-python/cookiecutter-robust-python
+[cookiecutter-robust-python]: https://github.com/56kyle/cookiecutter-robust-python
 [documentation]: https://robust-python-demo.readthedocs.io/
