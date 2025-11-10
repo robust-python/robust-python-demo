@@ -23,7 +23,7 @@ def main() -> None:
 def get_parser() -> argparse.ArgumentParser:
     """Creates the argument parser for setup-venv."""
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
-        prog="setup-venv", usage="python ./scripts/setup-venv.py . -p '3.9'"
+        prog="setup-venv", usage="python ./scripts/setup-venv.py . -p '3.10'"
     )
     parser.add_argument(
         "path",

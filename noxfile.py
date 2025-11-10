@@ -14,8 +14,8 @@ from nox.sessions import Session
 nox.options.default_venv_backend = "uv"
 
 # Logic that helps avoid metaprogramming in cookiecutter-robust-python
-MIN_PYTHON_VERSION_SLUG: int = int("3.9".lstrip("3."))
-MAX_PYTHON_VERSION_SLUG: int = int("3.13".lstrip("3."))
+MIN_PYTHON_VERSION_SLUG: int = int("3.10".lstrip("3."))
+MAX_PYTHON_VERSION_SLUG: int = int("3.14".lstrip("3."))
 
 PYTHON_VERSIONS: List[str] = [
     f"3.{VERSION_SLUG}" for VERSION_SLUG in range(MIN_PYTHON_VERSION_SLUG, MAX_PYTHON_VERSION_SLUG + 1)
