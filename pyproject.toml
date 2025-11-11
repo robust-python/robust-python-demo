@@ -1,6 +1,6 @@
 [project]
 name = "robust-python-demo"
-version = "0.29.0"
+version = "0.30.0"
 description = "robust-python-demo"
 authors = [
     { name = "Kyle Oliver", email = "56kyleoliver+cookiecutter-robust-python@gmail.com" },
@@ -8,12 +8,12 @@ authors = [
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.10,<4.0"
 keywords = [
     "robust-python-demo",
 ]
 classifiers = [
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [

@@ -1,5 +1,5 @@
 {
-  "_commit": "c0dc52f406bfda76f69a2a9ed9694bf15d213d34",
+  "_commit": "b34f76d47340e575885b5a23a58d974734369ed5",
   "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
   "add_rust_extension": false,
   "author": "Kyle Oliver",
@@ -8,8 +8,8 @@
   "email": "56kyleoliver+cookiecutter-robust-python@gmail.com",
   "friendly_name": "Robust Python Demo",
   "license": "MIT",
-  "max_python_version": "3.13",
-  "min_python_version": "3.9",
+  "max_python_version": "3.14",
+  "min_python_version": "3.10",
   "package_name": "robust_python_demo",
   "project_name": "robust-python-demo",
   "repository_host": "github.com",
