@@ -1,6 +1,6 @@
 {
   "template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-  "commit": "b34f76d47340e575885b5a23a58d974734369ed5",
+  "commit": "8c0bc77efd5d89f697c0f0222917b865e3aa9fce",
   "checkout": null,
   "context": {
     "cookiecutter": {
@@ -20,7 +20,16 @@
       "license": "MIT",
       "development_status": "Development Status :: 1 - Planning",
       "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-      "_commit": "b34f76d47340e575885b5a23a58d974734369ed5"
+      "_commit": "8c0bc77efd5d89f697c0f0222917b865e3aa9fce",
+      "_min_python_version_minor_int": 10,
+      "_max_python_version_minor_int": 14,
+      "python_versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     }
   },
   "directory": null
