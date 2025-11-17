@@ -1,6 +1,6 @@
 [project]
 name = "robust-python-demo"
-version = "0.30.0"
+version = "0.31.0"
 description = "robust-python-demo"
 authors = [
     { name = "Kyle Oliver", email = "56kyleoliver+cookiecutter-robust-python@gmail.com" },
@@ -13,8 +13,15 @@ keywords = [
     "robust-python-demo",
 ]
 classifiers = [
-    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Development Status :: 1 - Planning"
 ]
 dependencies = [
     "loguru>=0.7.3",
