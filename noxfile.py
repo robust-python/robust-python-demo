@@ -14,13 +14,7 @@ from nox.sessions import Session
 nox.options.default_venv_backend = "uv"
 os.environ.setdefault("PYO3_USE_ABI3_FORWARD_COMPATIBILITY", "1")
 
-# Logic that helps avoid metaprogramming in cookiecutter-robust-python
-MIN_PYTHON_VERSION_SLUG: int = int("3.10".lstrip("3."))
-MAX_PYTHON_VERSION_SLUG: int = int("3.14".lstrip("3."))
-
-PYTHON_VERSIONS: List[str] = [
-    f"3.{VERSION_SLUG}" for VERSION_SLUG in range(MIN_PYTHON_VERSION_SLUG, MAX_PYTHON_VERSION_SLUG + 1)
-]
+PYTHON_VERSIONS: List[str] = ['3.10', '3.11', '3.12', '3.13', '3.14']
 DEFAULT_PYTHON_VERSION: str = PYTHON_VERSIONS[-1]
 
 REPO_ROOT: Path = Path(__file__).parent.resolve()
@@ -102,11 +96,11 @@ def lint_python(session: Session) -> None:
 
 @nox.session(python=PYTHON_VERSIONS, name="typecheck")
 def typecheck(session: Session) -> None:
-    """Run static type checking (Pyright) on Python code."""
+    """Run static type checking (Basedpyright) on Python code."""
     session.log("Installing type checking dependencies...")
     session.install("-e", ".", "--group", "dev")
 
-    session.log(f"Running Pyright check with py{session.python}.")
+    session.log(f"Running Basedpyright check with py{session.python}.")
     session.run("pyright", "--pythonversion", session.python)
 
 

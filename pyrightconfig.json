@@ -32,8 +32,10 @@
   "reportPropertyTypeMismatch": "warning",
   "reportReturnTypeFromAnnotation": "warning",
   "reportMissingReturnType": "warning",
-  "basic": true,
   "reportMissingParameterType": "warning",
   "reportOptionalOperand": "warning",
-  "pythonVersion": "3.10"
+  "pythonVersion": "3.10",
+
+  "reportAny": "error",
+  "reportExplicitAny": "warning"
 }
