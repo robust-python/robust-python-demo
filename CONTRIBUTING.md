@@ -33,7 +33,7 @@ We welcome pull requests! For significant changes, it's best to open an issue fi
 
 ### Prerequisites
 
-- Python 3.9+ (this project supports Python 3.9-3.13)
+- Python 3.10+ (this project supports Python 3.10-3.14)
 - [uv][uv-documentation] for dependency management
 - Git for version control
 
@@ -84,7 +84,7 @@ We welcome pull requests! For significant changes, it's best to open an issue fi
    uvx nox -s tests-python
 
    # Run tests for a specific Python version
-   uvx nox -s tests-python-313
+   uvx nox -s tests-python-314
 
    # Run a specific test file
    uvx nox -s tests-python -- tests/unit_tests/test_specific.py

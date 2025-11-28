@@ -12,14 +12,9 @@ from nox.sessions import Session
 
 
 nox.options.default_venv_backend = "uv"
+os.environ.setdefault("PYO3_USE_ABI3_FORWARD_COMPATIBILITY", "1")
 
-# Logic that helps avoid metaprogramming in cookiecutter-robust-python
-MIN_PYTHON_VERSION_SLUG: int = int("3.9".lstrip("3."))
-MAX_PYTHON_VERSION_SLUG: int = int("3.13".lstrip("3."))
-
-PYTHON_VERSIONS: List[str] = [
-    f"3.{VERSION_SLUG}" for VERSION_SLUG in range(MIN_PYTHON_VERSION_SLUG, MAX_PYTHON_VERSION_SLUG + 1)
-]
+PYTHON_VERSIONS: List[str] = ['3.10', '3.11', '3.12', '3.13', '3.14']
 DEFAULT_PYTHON_VERSION: str = PYTHON_VERSIONS[-1]
 
 REPO_ROOT: Path = Path(__file__).parent.resolve()
