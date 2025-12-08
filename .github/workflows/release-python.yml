@@ -64,7 +64,7 @@ jobs:
           retention-days: 7
 
       - name: Download built package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: distribution-packages-${{ needs.get_tag.outputs.tag }}
           path: dist/
@@ -94,7 +94,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: distribution-packages-${{ needs.build_and_testpypi.outputs.tag }}
           path: dist/
