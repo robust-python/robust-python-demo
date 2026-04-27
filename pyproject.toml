@@ -58,6 +58,9 @@ docs = [
 Homepage = "https://github.com/56kyle/robust-python-demo"
 Repository = "https://github.com/56kyle/robust-python-demo"
 
+[tool.uv]
+exclude-newer = "1 week"
+
 [[tool.uv.index]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
