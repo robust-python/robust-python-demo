@@ -54,6 +54,9 @@ docs = [
     "sphinxcontrib-typer>=0.5.1",
 ]
 
+[project.scripts]
+robust-python-demo = "robust-python-demo.__main__:app"
+
 [project.urls]
 Homepage = "https://github.com/56kyle/robust-python-demo"
 Repository = "https://github.com/56kyle/robust-python-demo"

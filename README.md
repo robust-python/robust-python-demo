@@ -93,3 +93,6 @@ Distributed under the terms of the **MIT** license. See [LICENSE](LICENSE) for d
 
 [cookiecutter-robust-python]: https://github.com/robust-python/cookiecutter-robust-python
 [documentation]: https://robust-python-demo.readthedocs.io/
+[pip-documentation]: https://pip.pypa.io/en/stable/
+[nox-documentation]: https://nox.thea.codes/en/stable/
+[uv-documentation]: https://docs.astral.sh/uv/
