@@ -21,12 +21,12 @@ DEFAULT_PYTHON_VERSION: str = PYTHON_VERSIONS[-1]
 REPO_ROOT: Path = Path(__file__).parent.resolve()
 TESTS_FOLDER: Path = REPO_ROOT / "tests"
 SCRIPTS_FOLDER: Path = REPO_ROOT / "scripts"
-CRATES_FOLDER: Path = REPO_ROOT / "rust"
+RUST_MANIFEST: Path = REPO_ROOT / "rust" / "Cargo.toml"
 
 PROJECT_NAME: str = "robust-python-demo"
 PACKAGE_NAME: str = "robust_python_demo"
 REPOSITORY_HOST: str = "github.com"
-REPOSITORY_PATH: str = "56kyle/robust-python-demo"
+REPOSITORY_PATH: str = "robust-python/robust-python-demo"
 
 ENV: str = "env"
 FORMAT: str = "format"
@@ -219,36 +219,46 @@ def build_container(session: Session) -> None:
     session.log(f"Container image {project_image_name}:latest built locally.")
 
 
-@nox.session(python=False, name="setup-release", tags=[RELEASE])
-def setup_release(session: Session) -> None:
-    """Prepares a release by creating a release branch and bumping the version.
-
-    Additionally, creates the initial bump commit but doesn't push it.
-    """
-    session.log("Setting up release...")
-
-    session.run("python", SCRIPTS_FOLDER / "setup-release.py", *session.posargs, external=True)
+@nox.session(python=False, name="prepare-release", tags=[RELEASE])
+def prepare_release(session: Session) -> None:
+    """Create a validated local release branch and commit transactionally."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "prepare", *session.posargs, external=True)
 
 
-@nox.session(python=False, name="get-release-notes", tags=[RELEASE])
-def get_release_notes(session: Session) -> None:
-    """Gets the latest release notes if between bumping the version and tagging the release."""
-    session.log("Getting release notes...")
-    session.run("python", SCRIPTS_FOLDER / "get-release-notes.py", *session.posargs, external=True)
+@nox.session(python=False, name="validate-release", tags=[RELEASE])
+def validate_release(session: Session) -> None:
+    """Validate synchronized release metadata without publishing or tagging."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "validate", external=True)
 
 
-@nox.session(python=False, name="publish-python", tags=[RELEASE])
-def publish_python(session: Session) -> None:
-    """Publish sdist and wheel packages to PyPI via uv publish.
+@nox.session(python=False, name="build-release", tags=[RELEASE, BUILD])
+def build_release(session: Session) -> None:
+    """Build one pure-Python or Maturin host/matrix release cell."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "build", *session.posargs, external=True)
 
-    Requires packages to be built first (`nox -s build-python` or `nox -s build`).
-    Requires TWINE_USERNAME/TWINE_PASSWORD or TWINE_API_KEY environment variables set (usually in CI).
-    """
-    session.log("Checking built packages with Twine.")
-    session.run("uvx", "twine", "check", "dist/*")
 
-    session.log("Publishing packages to PyPI.")
-    session.run("uv", "publish", "dist/*", *session.posargs, external=True)
+@nox.session(python=False, name="extract-release-notes", tags=[RELEASE])
+def extract_release_notes(session: Session) -> None:
+    """Extract one exact committed changelog section into a release body."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "extract-notes", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="finalize-release", tags=[RELEASE])
+def finalize_release(session: Session) -> None:
+    """Validate and create an idempotent annotated exact-commit release tag."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "finalize", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="write-artifact-manifest", tags=[RELEASE])
+def write_artifact_manifest(session: Session) -> None:
+    """Create one manifest after CI aggregates all release artifacts."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "manifest", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="verify-release-index", tags=[RELEASE])
+def verify_release_index(session: Session) -> None:
+    """Require an exact artifact-manifest match at TestPyPI or PyPI."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "verify-index", *session.posargs, external=True)
 
 
 @nox.session(python=False)

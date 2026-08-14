@@ -42,6 +42,8 @@ dev = [
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "basedpyright>=1.34.0",
+    "twine>=6.2.0",
+
 ]
 docs = [
     "furo>=2024.8.6",
@@ -58,8 +60,8 @@ docs = [
 robust-python-demo = "robust_python_demo.__main__:app"
 
 [project.urls]
-Homepage = "https://github.com/56kyle/robust-python-demo"
-Repository = "https://github.com/56kyle/robust-python-demo"
+Homepage = "https://github.com/robust-python/robust-python-demo"
+Repository = "https://github.com/robust-python/robust-python-demo"
 
 [tool.uv]
 exclude-newer = "1 week"

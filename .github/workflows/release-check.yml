@@ -1,0 +1,41 @@
+name: Release Check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: startsWith(github.head_ref, 'release/')
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the release branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Validate the release
+        run: uv run --locked nox -s validate-release
+
+  build:
+    if: startsWith(github.head_ref, 'release/')
+    name: Build and smoke-test release artifacts
+    needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      artifact-prefix: release-check

@@ -1,5 +1,5 @@
 {
-  "_commit": "875793cc238aafeaa3bffe4e4b9ed49e1153e4ff",
+  "_commit": "fc7237f425410bc4ce252830a92829378b4bc503",
   "_max_python_version_minor_int": 14,
   "_min_python_version_minor_int": 10,
   "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
@@ -14,6 +14,7 @@
   "min_python_version": "3.10",
   "package_name": "robust_python_demo",
   "project_name": "robust-python-demo",
+  "publish_rust_package": false,
   "python_versions": [
     "3.10",
     "3.11",
@@ -22,7 +23,10 @@
     "3.14"
   ],
   "repository_host": "github.com",
-  "repository_path": "56kyle/robust-python-demo",
+  "repository_path": "robust-python/robust-python-demo",
   "repository_provider": "github",
+  "rust_package_name": "robust_python_demo_core",
+  "rust_project_name": "robust-python-demo-core",
+  "rust_python_abi": "abi3",
   "version": "0.0.0"
 }

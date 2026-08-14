@@ -4,7 +4,7 @@ robust_python_demo
 
 ---
 
-**[📚 View Documentation](https://robust-python-demo.readthedocs.io/)** | **[🐛 Report a Bug](https://github.com/56kyle/robust-python-demo/issues)** | **[✨ Request a Feature](https://github.com/56kyle/robust-python-demo/issues)**
+**[📚 View Documentation](https://robust-python-demo.readthedocs.io/)** | **[🐛 Report a Bug](https://github.com/robust-python/robust-python-demo/issues)** | **[✨ Request a Feature](https://github.com/robust-python/robust-python-demo/issues)**
 
 ---
 
@@ -22,7 +22,7 @@ To set up `robust_python_demo` for local development:
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/56kyle/robust-python-demo.git
+    git clone https://github.com/robust-python/robust-python-demo.git
     cd robust-python-demo
     ```
 2.  Install dependencies using [:term:`uv`](uv-documentation):
@@ -73,11 +73,13 @@ This project uses a robust set of tools for development, testing, and quality as
 
 Explore the `noxfile.py` and the project documentation for detailed information on the automated workflow.
 
+Maintainers use the protected [release procedure](docs/releasing.md) to validate on TestPyPI, publish the same artifacts, and backmerge `main` into `develop`.
+
 ## Contributing
 
 (This section should guide contributions _to this specific generated project_, not the template. It should refer to the project's `CODE_OF_CONDUCT.md` and link to a `CONTRIBUTING.md` specific to the project, if you choose to generate one.)
 
-Report bugs or suggest features via the [issue tracker](https://github.com/56kyle/robust-python-demo/issues).
+Report bugs or suggest features via the [issue tracker](https://github.com/robust-python/robust-python-demo/issues).
 
 See [CONTRIBUTING.md](#) for contribution guidelines.
 
