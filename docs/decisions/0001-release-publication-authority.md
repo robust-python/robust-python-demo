@@ -8,7 +8,7 @@
 
 ## Context and problem statement
 
-A release changes several immutable systems: Git tags, TestPyPI, PyPI, and GitHub Releases. Local and CI release paths must agree on the version and changelog. Credentials must not be available to pull-request code. Partial failures must not cause a rebuild or a conflicting upload.
+A release changes several immutable systems: Git tags, TestPyPI, PyPI, and GitHub Releases. Local and CI release paths must agree on the version and changelog. Credentials must not be available to pull-request code. Partial failures must not cause a conflicting upload. Recovery should reuse the retained release bundle when possible and must detect any mismatch when a rebuild is required after retention expires.
 
 ## Decision drivers
 
@@ -45,6 +45,13 @@ The workflow records artifact hashes before publication. A rerun skips an existi
 - Bad, because a release uses several sequential jobs and can take longer than direct publication.
 - Bad, because TestPyPI filename conflicts require a new release version.
 - Neutral, because GitHub is the first release orchestrator while Nox remains the vendor-neutral local interface.
+- Bad, because GitLab and Bitbucket retain local validation and build interfaces but no generated publication workflow.
+- Bad, because publication is not atomic: the tag and Rust crate can exist before a later PyPI failure.
+- Bad, because workflow artifacts expire and a byte-identical recovery rebuild is not guaranteed.
+- Bad, because protected-environment reviewers are unavailable for private repositories on some GitHub plans.
+- Bad, because immutable action pins, native build minutes, macOS and preview ARM runners, and retained artifacts add operating cost.
+- Bad, because the custom release tool and its narrow metadata and registry parsers require continued maintenance.
+- Neutral, because the hash manifest is an integrity check, not signed provenance, an SBOM, or an artifact attestation.
 
 ### Confirmation
 
@@ -54,7 +61,9 @@ The release workflows must show that:
 - TestPyPI succeeds before tag creation;
 - each publishing job has only its required `id-token` or `contents` permission;
 - production jobs download the recorded release bundle instead of rebuilding it; and
-- the GitHub release job depends on every configured production publication.
+- the GitHub release job depends on every configured production publication;
+- an existing GitHub Release is accepted only when its tag target, title, exact notes, and complete asset set match; and
+- backmerge reruns never force-push and accept only an exactly matching open pull request.
 
 ## Pros and cons of the options
 
@@ -62,7 +71,7 @@ The release workflows must show that:
 
 - Good, because it separates reviewable preparation from irreversible publication.
 - Good, because protected environments establish clear authority.
-- Bad, because recovery depends on retained workflow artifacts or an identical rebuild that passes manifest checks.
+- Bad, because recovery depends on retained workflow artifacts or a byte-identical rebuild that passes manifest checks.
 
 ### Local publication by a maintainer
 

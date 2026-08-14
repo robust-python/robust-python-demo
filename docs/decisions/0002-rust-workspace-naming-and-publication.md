@@ -41,6 +41,10 @@ The core and binding crates inherit the workspace version. `pyproject.toml` rema
 - Good, because pure Rust logic can be tested and published without the binding layer.
 - Bad, because workspace metadata and lockfiles require synchronized validation.
 - Bad, because CPython ABI mode increases the release matrix substantially.
+- Bad, because `abi3` restricts extension code to Python's limited API even though it reduces the matrix to one wheel per platform.
+- Bad, because `test = false` disables the binding crate's Cargo test harness; confidence instead comes from core tests, Cargo checks, and native-wheel smoke tests.
+- Bad, because the CPython matrix increases CI time, storage, and macOS and Linux ARM runner cost.
+- Neutral, because registry round-trip verification installs only a host-compatible wheel while hashes and pre-upload platform smoke tests cover the other artifacts.
 - Neutral, because enabling crates.io publication later is supported, while disabling it after public releases cannot remove published versions.
 
 ### Confirmation

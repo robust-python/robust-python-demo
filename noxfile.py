@@ -261,6 +261,30 @@ def verify_release_index(session: Session) -> None:
     session.run("python", SCRIPTS_FOLDER / "release.py", "verify-index", *session.posargs, external=True)
 
 
+@nox.session(python=False, name="resolve-release-identity", tags=[RELEASE])
+def resolve_release_identity(session: Session) -> None:
+    """Resolve explicit workflow inputs into a validated release identity."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "resolve-identity", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="inspect-crate-release", tags=[RELEASE])
+def inspect_crate_release(session: Session) -> None:
+    """Classify an immutable crates.io release as missing, identical, or conflicting."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "crate-state", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="publish-github-release", tags=[RELEASE])
+def publish_github_release(session: Session) -> None:
+    """Create or exactly verify an immutable GitHub Release."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "github-release", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="open-release-backmerge", tags=[RELEASE])
+def open_release_backmerge(session: Session) -> None:
+    """Create or exactly verify the non-destructive release backmerge PR."""
+    session.run("python", SCRIPTS_FOLDER / "release.py", "backmerge", *session.posargs, external=True)
+
+
 @nox.session(python=False)
 def tox(session: Session) -> None:
     """Run the 'tox' test matrix.

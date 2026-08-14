@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -32,7 +31,15 @@ PYPROJECT_PATH = Path("pyproject.toml")
 CHANGELOG_PATH = Path("CHANGELOG.md")
 UV_LOCK_PATH = Path("uv.lock")
 RUST_MANIFEST_PATH = Path("rust/Cargo.toml")
+RUST_LOCK_PATH = Path("rust/Cargo.lock")
 ARTIFACT_MANIFEST_NAME = "release-artifacts.json"
+_RELEASE_OWNED_PATHS = (
+    PYPROJECT_PATH,
+    UV_LOCK_PATH,
+    CHANGELOG_PATH,
+    RUST_MANIFEST_PATH,
+    RUST_LOCK_PATH,
+)
 _VERSION_PATTERN = re.compile(
     r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)"
     r"(?:(?P<phase>a|b|rc)(?P<number>0|[1-9]\d*))?$"
@@ -93,6 +100,26 @@ class RegistryConflictError(ReleaseError):
 
 class TagConflictError(ReleaseError):
     """Raised when an existing tag is not the requested annotated tag."""
+
+
+class ReleasePreparationError(ReleaseError):
+    """Raised after release preparation fails with its evidence preserved."""
+
+
+class RegistryTransportError(ReleaseError):
+    """Raised when a registry cannot return an authoritative response."""
+
+
+class RegistryResponseError(ReleaseError):
+    """Raised when a registry returns an unsupported response shape."""
+
+
+class GitHubReleaseConflictError(ReleaseError):
+    """Raised when an existing GitHub Release differs from local evidence."""
+
+
+class BackmergeConflictError(ReleaseError):
+    """Raised when existing backmerge state is not a verified safe rerun."""
 
 
 @dataclass(frozen=True)
@@ -195,6 +222,39 @@ class RegistryArtifactState(str, Enum):
     MISSING = "missing"
     IDENTICAL = "identical"
     CONFLICT = "conflict"
+
+
+class BuildKind(str, Enum):
+    """Artifact kinds supported by one release build invocation."""
+
+    WHEEL = "wheel"
+    SDIST = "sdist"
+    ALL = "all"
+
+
+class ReleaseEventKind(str, Enum):
+    """Explicit workflow events that can establish release identity."""
+
+    PULL_REQUEST = "pull_request"
+    WORKFLOW_DISPATCH = "workflow_dispatch"
+    PUSH = "push"
+
+
+class CrateVersionState(str, Enum):
+    """Comparison state for one immutable crates.io version."""
+
+    MISSING = "missing"
+    IDENTICAL = "identical"
+    CONFLICT = "conflict"
+
+
+@dataclass(frozen=True)
+class ReleaseIdentity:
+    """Validated version, tag, and full source commit for a release run."""
+
+    version: ReleaseVersion
+    tag: str
+    commit: str
 
 
 def _run_checked(command: Sequence[str], repo: Path = REPO_ROOT) -> str:
@@ -330,11 +390,10 @@ def _bump_with_commitizen(request: str, repo: Path) -> None:
 
 
 def prepare_release(request: str, repo: Path = REPO_ROOT) -> ReleaseVersion:
-    """Create a fully validated release branch and commit transactionally."""
+    """Create a release branch while preserving all failure evidence."""
     starting_commit = _require_clean_synchronized_develop(repo)
     target = _next_version(request, repo)
     branch = f"release/{target.python}"
-    branch_created = False
     try:
         _git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}", repo=repo)
     except subprocess.CalledProcessError:
@@ -347,9 +406,8 @@ def prepare_release(request: str, repo: Path = REPO_ROOT) -> ReleaseVersion:
         pass
     else:
         raise RepositoryStateError(f"Remote release branch origin/{branch} already exists.")
+    _git("checkout", "-b", branch, starting_commit, repo=repo)
     try:
-        _git("checkout", "-b", branch, starting_commit, repo=repo)
-        branch_created = True
         _bump_with_commitizen(request, repo)
         actual = read_project_version(repo)
         if actual != target:
@@ -361,16 +419,15 @@ def prepare_release(request: str, repo: Path = REPO_ROOT) -> ReleaseVersion:
                 ("cargo", "check", "--workspace", "--manifest-path", str(RUST_MANIFEST_PATH)),
                 repo,
             )
-        _git("add", "--all", repo=repo)
+        owned_paths = [str(path) for path in _RELEASE_OWNED_PATHS if (repo / path).exists()]
+        _git("add", "--", *owned_paths, repo=repo)
         _git("commit", "-m", f"chore(release): prepare v{target.python}", repo=repo)
         validate_release(repo)
-    except BaseException:
-        if branch_created:
-            _git("reset", "--hard", starting_commit, repo=repo)
-            _git("clean", "-fd", repo=repo)
-            _git("checkout", "develop", repo=repo)
-            _git("branch", "-D", branch, repo=repo)
-        raise
+    except Exception as error:
+        raise ReleasePreparationError(
+            f"Release preparation failed on {branch}. The branch and all generated evidence were preserved; "
+            "inspect the working tree, repair it in place, or delete the branch manually after saving anything needed."
+        ) from error
     return target
 
 
@@ -429,13 +486,6 @@ def _validate_rust_versions(version: ReleaseVersion, repo: Path) -> None:
         )
 
 
-def _validate_contextual_tag(version: ReleaseVersion) -> None:
-    """Validate a CI tag when the checkout declares one."""
-    tag = os.environ.get("GITHUB_REF_NAME") if os.environ.get("GITHUB_REF_TYPE") == "tag" else None
-    if tag is not None and tag != f"v{version.python}":
-        raise VersionMismatchError(f"Tag {tag!r} does not match v{version.python}.")
-
-
 def _read_uv_lock_version(repo: Path) -> ReleaseVersion:
     """Read the editable root package version recorded by uv."""
     lock_path = repo / UV_LOCK_PATH
@@ -459,22 +509,8 @@ def _read_uv_lock_version(repo: Path) -> ReleaseVersion:
     return matches[0]
 
 
-def _validate_expected_ci_boundary(version: ReleaseVersion, repo: Path) -> None:
-    """Validate optional workflow-provided version and exact-commit boundaries."""
-    expected_version = os.environ.get("RELEASE_VERSION")
-    if expected_version is not None:
-        normalized = expected_version.removeprefix("v")
-        if ReleaseVersion.from_python(normalized) != version:
-            raise VersionMismatchError(f"RELEASE_VERSION {expected_version!r} does not match {version.python}.")
-    expected_commit = os.environ.get("RELEASE_COMMIT")
-    if expected_commit is not None:
-        resolved = _git("rev-parse", f"{expected_commit}^" + "{commit}", repo=repo)
-        if _git("rev-parse", "HEAD", repo=repo) != resolved:
-            raise RepositoryStateError(f"HEAD is not RELEASE_COMMIT {resolved}.")
-
-
 def validate_release(repo: Path = REPO_ROOT) -> ReleaseVersion:
-    """Validate release version, lockfiles, changelog, and contextual tag."""
+    """Validate release version, lockfiles, and changelog."""
     version = read_project_version(repo)
     _run_checked(("uv", "lock", "--check"), repo)
     lock_version = _read_uv_lock_version(repo)
@@ -485,9 +521,103 @@ def validate_release(repo: Path = REPO_ROOT) -> ReleaseVersion:
         raise VersionMismatchError(f"Commitizen reports {commitizen_version.python}, expected {version.python}.")
     extract_release_notes((repo / CHANGELOG_PATH).read_text(encoding="utf-8"), version)
     _validate_rust_versions(version, repo)
-    _validate_contextual_tag(version)
-    _validate_expected_ci_boundary(version, repo)
     return version
+
+
+def _pull_request_release_version(branch: str | None, tag: str | None) -> ReleaseVersion:
+    """Validate pull-request fields and return the branch version."""
+    if branch is None or not branch.startswith("release/"):
+        raise RepositoryStateError("A pull_request release requires --branch release/<version>.")
+    if tag is not None:
+        raise RepositoryStateError("A pull_request release derives its tag; do not pass --tag.")
+    return ReleaseVersion.from_python(branch.removeprefix("release/"))
+
+
+def _push_release_version(tag: str | None, branch: str | None, commit: str, repo: Path) -> ReleaseVersion:
+    """Validate tag-push fields and return the tag version."""
+    if tag is None or not tag.startswith("v"):
+        raise RepositoryStateError("A push recovery requires --tag v<version>.")
+    if branch is not None:
+        raise RepositoryStateError("A push recovery does not accept --branch.")
+    tagged_commit = _git("rev-parse", f"refs/tags/{tag}^" + "{commit}", repo=repo)
+    if tagged_commit != commit:
+        raise TagConflictError(f"Tag {tag} targets {tagged_commit}, not {commit}.")
+    return ReleaseVersion.from_python(tag.removeprefix("v"))
+
+
+def _manual_release_version(version_text: str | None, branch: str | None) -> ReleaseVersion:
+    """Validate manual-dispatch fields and return the requested version."""
+    if version_text is None:
+        raise RepositoryStateError("A workflow_dispatch release requires --version.")
+    event_version = ReleaseVersion.from_python(version_text.removeprefix("v"))
+    if branch is None:
+        return event_version
+    if not branch.startswith("release/"):
+        raise RepositoryStateError("A workflow_dispatch branch must use release/<version>.")
+    branch_version = ReleaseVersion.from_python(branch.removeprefix("release/"))
+    if branch_version != event_version:
+        raise VersionMismatchError(f"Branch {branch!r} does not match {event_version.python}.")
+    return event_version
+
+
+def _event_release_version(
+    event_kind: ReleaseEventKind,
+    branch: str | None,
+    version_text: str | None,
+    tag: str | None,
+    commit: str,
+    repo: Path,
+) -> ReleaseVersion:
+    """Validate event-specific fields and return their release version."""
+    if event_kind is ReleaseEventKind.PULL_REQUEST:
+        return _pull_request_release_version(branch, tag)
+    if event_kind is ReleaseEventKind.PUSH:
+        return _push_release_version(tag, branch, commit, repo)
+    return _manual_release_version(version_text, branch)
+
+
+def resolve_release_identity(
+    event_kind: ReleaseEventKind,
+    commit: str,
+    *,
+    branch: str | None = None,
+    version_text: str | None = None,
+    tag: str | None = None,
+    repo: Path = REPO_ROOT,
+) -> ReleaseIdentity:
+    """Resolve explicit event inputs into one validated release identity."""
+    resolved_commit = _git("rev-parse", f"{commit}^" + "{commit}", repo=repo)
+    if _git("rev-parse", "HEAD", repo=repo) != resolved_commit:
+        raise RepositoryStateError(f"HEAD is not the requested release commit {resolved_commit}.")
+    event_version = _event_release_version(event_kind, branch, version_text, tag, resolved_commit, repo)
+
+    if version_text is not None and ReleaseVersion.from_python(version_text.removeprefix("v")) != event_version:
+        raise VersionMismatchError(f"Version {version_text!r} does not match event version {event_version.python}.")
+    expected_tag = f"v{event_version.python}"
+    if tag is not None and tag != expected_tag:
+        raise VersionMismatchError(f"Tag {tag!r} does not match {expected_tag}.")
+    if tag is not None and event_kind is not ReleaseEventKind.PUSH:
+        tagged_commit = _git("rev-parse", f"refs/tags/{tag}^" + "{commit}", repo=repo)
+        if tagged_commit != resolved_commit:
+            raise TagConflictError(f"Tag {tag} targets {tagged_commit}, not {resolved_commit}.")
+    project_version = read_project_version(repo)
+    if project_version != event_version:
+        raise VersionMismatchError(
+            f"Event identifies {event_version.python}, but pyproject.toml contains {project_version.python}."
+        )
+    return ReleaseIdentity(version=event_version, tag=expected_tag, commit=resolved_commit)
+
+
+def write_release_identity(identity: ReleaseIdentity, output_path: Path) -> None:
+    """Write release identity fields to an explicit workflow output file."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        f"version={identity.version.python}\n"
+        f"cargo_version={identity.version.cargo}\n"
+        f"commit={identity.commit}\n"
+        f"tag={identity.tag}\n",
+        encoding="utf-8",
+    )
 
 
 def _normalize_distribution(value: str) -> str:
@@ -604,42 +734,72 @@ def write_artifact_manifest(artifact_dir: Path, manifest_path: Path, repo: Path 
 
 def build_release(
     out_dir: Path,
+    kind: BuildKind,
     target: str | None = None,
     interpreter: str | None = None,
-    include_sdist: bool = False,
     repo: Path = REPO_ROOT,
 ) -> list[ArtifactIdentity]:
-    """Build one host or matrix cell and refresh its artifact manifest."""
-    out_dir = out_dir.resolve()
+    """Build exactly the requested release artifact kind or kinds."""
+    if kind is BuildKind.SDIST and (target is not None or interpreter is not None):
+        raise ArtifactError("An sdist build does not accept --target or --interpreter.")
+    out_dir = (repo / out_dir).resolve() if not out_dir.is_absolute() else out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     is_maturin = "[tool.maturin]" in (repo / PYPROJECT_PATH).read_text(encoding="utf-8")
+    if not is_maturin and target is not None:
+        raise ArtifactError("--target is available only for Maturin builds.")
+    for path in out_dir.iterdir():
+        if path.is_file() and (
+            path.suffix == ".whl" or path.name.endswith(".tar.gz") or path.name == ARTIFACT_MANIFEST_NAME
+        ):
+            path.unlink()
     if is_maturin:
-        command = ["uv", "run", "--locked", "maturin", "build", "--release", "--out", str(out_dir)]
-        if target is not None:
-            command.extend(("--target", target))
-        if interpreter is not None:
-            command.extend(("--interpreter", interpreter))
-        _run_checked(command, repo)
-        if include_sdist:
-            _run_checked(("uv", "run", "--locked", "maturin", "sdist", "--out", str(out_dir)), repo)
+        _build_maturin_release(out_dir, kind, target, interpreter, repo)
     else:
-        if target is not None:
-            raise ArtifactError("--target is available only for Maturin builds.")
-        command = ["uv", "build", "--wheel", "--out-dir", str(out_dir)]
-        if interpreter is not None:
-            command.extend(("--python", interpreter))
-        _run_checked(command, repo)
-        if include_sdist:
-            sdist_command = ["uv", "build", "--sdist", "--out-dir", str(out_dir)]
-            if interpreter is not None:
-                sdist_command.extend(("--python", interpreter))
-            _run_checked(sdist_command, repo)
+        _build_python_release(out_dir, kind, target, interpreter, repo)
     cell_manifest = out_dir / ARTIFACT_MANIFEST_NAME
     identities = write_artifact_manifest(out_dir, cell_manifest, repo)
     cell_manifest.unlink()
     for wheel in sorted(out_dir.glob("*.whl")):
         _smoke_test_wheel(wheel, repo)
     return identities
+
+
+def _build_maturin_release(
+    out_dir: Path,
+    kind: BuildKind,
+    target: str | None,
+    interpreter: str | None,
+    repo: Path,
+) -> None:
+    """Build Maturin artifacts for one explicit build kind."""
+    if kind in {BuildKind.WHEEL, BuildKind.ALL}:
+        command = ["uv", "run", "--locked", "maturin", "build", "--release", "--out", str(out_dir)]
+        if target is not None:
+            command.extend(("--target", target))
+        if interpreter is not None:
+            command.extend(("--interpreter", interpreter))
+        _run_checked(command, repo)
+    if kind in {BuildKind.SDIST, BuildKind.ALL}:
+        _run_checked(("uv", "run", "--locked", "maturin", "sdist", "--out", str(out_dir)), repo)
+
+
+def _build_python_release(
+    out_dir: Path,
+    kind: BuildKind,
+    target: str | None,
+    interpreter: str | None,
+    repo: Path,
+) -> None:
+    """Build pure-Python artifacts for one explicit build kind."""
+    if target is not None:
+        raise ArtifactError("--target is available only for Maturin builds.")
+    if kind in {BuildKind.WHEEL, BuildKind.ALL}:
+        command = ["uv", "build", "--wheel", "--out-dir", str(out_dir)]
+        if interpreter is not None:
+            command.extend(("--python", interpreter))
+        _run_checked(command, repo)
+    if kind in {BuildKind.SDIST, BuildKind.ALL}:
+        _run_checked(("uv", "build", "--sdist", "--out-dir", str(out_dir)), repo)
 
 
 def _smoke_test_import(installed_path: Path, repo: Path) -> None:
@@ -691,8 +851,22 @@ def _parse_manifest_identity(item: object) -> ArtifactIdentity:
                 abi=str(raw_tags["abi"]),
                 platform=str(raw_tags["platform"]),
             )
+        raw_filename = item["filename"]
+        if not isinstance(raw_filename, str):
+            raise ArtifactError("Artifact manifest filename must be a string.")
+        filename = raw_filename
+        if (
+            not filename
+            or filename in {".", ".."}
+            or "/" in filename
+            or "\\" in filename
+            or ":" in filename
+            or Path(filename).is_absolute()
+            or Path(filename).name != filename
+        ):
+            raise ArtifactError(f"Artifact manifest filename {filename!r} must be a plain filename.")
         return ArtifactIdentity(
-            filename=str(item["filename"]),
+            filename=filename,
             kind=str(item["kind"]),
             distribution=str(item["distribution"]),
             canonical_distribution=str(item["canonical_distribution"]),
@@ -784,27 +958,14 @@ def compare_registry_artifacts(index: str, manifest_path: Path) -> dict[str, Reg
     """Compare local identities with immutable files already at a registry."""
     if index not in {"testpypi", "pypi"}:
         raise ArtifactError(f"Unsupported registry {index!r}.")
-    distribution, version, source_commit, identities = _load_artifact_manifest(manifest_path)
-    expected_version = os.environ.get("RELEASE_VERSION")
-    if (
-        expected_version is not None
-        and ReleaseVersion.from_python(expected_version.removeprefix("v")).python != version
-    ):
-        raise VersionMismatchError(f"Manifest version {version} does not match RELEASE_VERSION {expected_version}.")
-    expected_commit = os.environ.get("RELEASE_COMMIT")
-    if expected_commit is not None:
-        normalized_commit = _git("rev-parse", f"{expected_commit}^" + "{commit}")
-        if source_commit != normalized_commit:
-            raise VersionMismatchError(
-                f"Manifest source commit {source_commit} does not match RELEASE_COMMIT {normalized_commit}."
-            )
+    distribution, version, _, identities = _load_artifact_manifest(manifest_path)
     remote = _fetch_registry_files(index, distribution, version)
     if remote is None:
         return {identity.filename: RegistryArtifactState.MISSING for identity in identities}
     result: dict[str, RegistryArtifactState] = {}
     for identity in identities:
         remote_identity = remote.get(identity.filename)
-        if remote_identity is None:
+        if not isinstance(remote_identity, dict):
             result[identity.filename] = RegistryArtifactState.MISSING
         elif (
             remote_identity.get("size") == identity.size
@@ -899,6 +1060,294 @@ def finalize_release(version_text: str, commit: str, repo: Path = REPO_ROOT) -> 
     return False
 
 
+def inspect_crate_version(crate_name: str, version: ReleaseVersion, archive: Path) -> CrateVersionState:
+    """Compare one local crate archive with the immutable crates.io version."""
+    if not archive.is_file():
+        raise ArtifactError(f"Crate archive does not exist: {archive}.")
+    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+    url = (
+        "https://crates.io/api/v1/crates/"
+        f"{urllib.parse.quote(crate_name, safe='')}/{urllib.parse.quote(version.cargo, safe='')}"
+    )
+    request = urllib.request.Request(  # noqa: S310
+        url,
+        headers={"User-Agent": f"{PROJECT_NAME}-release-tool"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return CrateVersionState.MISSING
+        raise RegistryTransportError(
+            f"crates.io returned HTTP {error.code} for {crate_name} {version.cargo}."
+        ) from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise RegistryTransportError(f"Could not query crates.io for {crate_name} {version.cargo}.") from error
+    except json.JSONDecodeError as error:
+        raise RegistryResponseError("crates.io returned malformed JSON.") from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("version"), dict):
+        raise RegistryResponseError("crates.io response has no version object.")
+    remote_checksum = payload["version"].get("checksum")
+    if not isinstance(remote_checksum, str) or re.fullmatch(r"[0-9a-f]{64}", remote_checksum) is None:
+        raise RegistryResponseError("crates.io response has no valid version checksum.")
+    if remote_checksum == checksum:
+        return CrateVersionState.IDENTICAL
+    return CrateVersionState.CONFLICT
+
+
+def write_crate_state(state: CrateVersionState, output_path: Path) -> None:
+    """Write one crates.io comparison state to an explicit output file."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(f"state={state.value}\n", encoding="utf-8")
+
+
+def _run_process(command: Sequence[str], repo: Path) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess while retaining its status and diagnostic streams."""
+    return subprocess.run(
+        list(command),
+        cwd=repo,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _manifest_release_assets(
+    manifest_path: Path,
+    artifact_dir: Path,
+    expected_commit: str,
+) -> tuple[ReleaseVersion, dict[str, tuple[int, str]]]:
+    """Validate local release assets against their immutable manifest."""
+    _, version_text, source_commit, identities = _load_artifact_manifest(manifest_path)
+    if source_commit != expected_commit:
+        raise ArtifactError(f"Artifact manifest targets {source_commit}, not release commit {expected_commit}.")
+    artifact_root = artifact_dir.resolve()
+    expected: dict[str, tuple[int, str]] = {}
+    for identity in identities:
+        asset_path = (artifact_root / identity.filename).resolve()
+        if asset_path.parent != artifact_root:
+            raise ArtifactError(f"Release asset {identity.filename!r} escapes the artifact directory.")
+        if not asset_path.is_file() or identify_artifact(asset_path) != identity:
+            raise ArtifactError(f"Local release asset {identity.filename} does not match the manifest.")
+        expected[identity.filename] = (identity.size, identity.sha256)
+    return ReleaseVersion.from_python(version_text), expected
+
+
+def _parse_github_release_assets(payload: dict[str, object]) -> dict[str, tuple[int, str]]:
+    """Parse GitHub Release asset identity from an untrusted API response."""
+    raw_assets = payload.get("assets")
+    if not isinstance(raw_assets, list):
+        raise GitHubReleaseConflictError("GitHub Release response has no assets list.")
+    assets: dict[str, tuple[int, str]] = {}
+    for raw_asset in raw_assets:
+        if not isinstance(raw_asset, dict):
+            raise GitHubReleaseConflictError("GitHub Release contains an invalid asset entry.")
+        name = raw_asset.get("name")
+        size = raw_asset.get("size")
+        digest = raw_asset.get("digest")
+        if (
+            not isinstance(name, str)
+            or not isinstance(size, int)
+            or not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+        ):
+            raise GitHubReleaseConflictError("GitHub Release asset identity is incomplete.")
+        if name in assets:
+            raise GitHubReleaseConflictError(f"GitHub Release contains duplicate asset {name!r}.")
+        assets[name] = (size, digest.removeprefix("sha256:"))
+    return assets
+
+
+def ensure_immutable_github_release(
+    tag: str,
+    commit: str,
+    title: str,
+    notes_path: Path,
+    manifest_path: Path,
+    artifact_dir: Path,
+    repo: Path = REPO_ROOT,
+) -> bool:
+    """Create an absent GitHub Release or verify an exactly identical one."""
+    resolved_commit = _git("rev-parse", f"{commit}^" + "{commit}", repo=repo)
+    if _git("cat-file", "-t", f"refs/tags/{tag}", repo=repo) != "tag":
+        raise TagConflictError(f"Existing {tag} is not an annotated tag.")
+    tagged_commit = _git("rev-parse", f"refs/tags/{tag}^" + "{commit}", repo=repo)
+    if tagged_commit != resolved_commit:
+        raise TagConflictError(f"Tag {tag} targets {tagged_commit}, not {resolved_commit}.")
+    notes = notes_path.read_text(encoding="utf-8")
+    release_version, expected_assets = _manifest_release_assets(manifest_path, artifact_dir, resolved_commit)
+    if tag != f"v{release_version.python}":
+        raise VersionMismatchError(f"Tag {tag!r} does not match artifact version {release_version.python}.")
+    is_prerelease = release_version.phase is not None
+    view = _run_process(("gh", "api", "repos/{owner}/{repo}/releases/tags/" + tag), repo)
+    if view.returncode != 0:
+        diagnostic = f"{view.stdout}\n{view.stderr}"
+        if "HTTP 404" not in diagnostic and "Not Found" not in diagnostic:
+            raise RegistryTransportError(f"Could not inspect GitHub Release {tag}: {view.stderr.strip()}")
+        asset_paths = [str(artifact_dir / filename) for filename in sorted(expected_assets)]
+        command = [
+            "gh",
+            "release",
+            "create",
+            tag,
+            *asset_paths,
+            "--title",
+            title,
+            "--notes-file",
+            str(notes_path),
+            "--verify-tag",
+            "--target",
+            resolved_commit,
+        ]
+        if is_prerelease:
+            command.append("--prerelease")
+        _run_checked(command, repo)
+        return True
+    try:
+        payload = json.loads(view.stdout)
+    except json.JSONDecodeError as error:
+        raise GitHubReleaseConflictError("GitHub Release response is malformed JSON.") from error
+    if not isinstance(payload, dict):
+        raise GitHubReleaseConflictError("GitHub Release response must be an object.")
+    actual_assets = _parse_github_release_assets(payload)
+    if (
+        payload.get("tag_name") != tag
+        or payload.get("name") != title
+        or payload.get("body") != notes
+        or payload.get("draft") is not False
+        or payload.get("prerelease") is not is_prerelease
+        or actual_assets != expected_assets
+    ):
+        raise GitHubReleaseConflictError(
+            f"Existing GitHub Release {tag} differs from the requested immutable title, notes, or assets."
+        )
+    return False
+
+
+def _require_released_commit(version: ReleaseVersion, commit: str, repo: Path) -> tuple[str, str]:
+    """Return an exact full commit and tag after validating their relationship."""
+    resolved_commit = _git("rev-parse", f"{commit}^" + "{commit}", repo=repo)
+    tag = f"v{version.python}"
+    if _git("cat-file", "-t", f"refs/tags/{tag}", repo=repo) != "tag":
+        raise TagConflictError(f"Existing {tag} is not an annotated tag.")
+    tagged_commit = _git("rev-parse", f"refs/tags/{tag}^" + "{commit}", repo=repo)
+    if tagged_commit != resolved_commit:
+        raise TagConflictError(f"Tag {tag} targets {tagged_commit}, not {resolved_commit}.")
+    return resolved_commit, tag
+
+
+def _verify_existing_backmerge(branch: str, release_commit: str, repo: Path) -> bool:
+    """Verify an existing merge branch and report whether its exact PR exists."""
+    _git("fetch", "origin", branch, "develop", repo=repo)
+    remote_tip = _git("rev-parse", f"origin/{branch}^" + "{commit}", repo=repo)
+    parent_line = _git("rev-list", "--parents", "-n", "1", remote_tip, repo=repo).split()
+    if len(parent_line) != 3 or parent_line[2] != release_commit:
+        raise BackmergeConflictError(f"origin/{branch} is not the expected two-parent release merge.")
+    try:
+        _git("merge-base", "--is-ancestor", parent_line[1], "origin/develop", repo=repo)
+    except subprocess.CalledProcessError as error:
+        raise BackmergeConflictError(
+            f"The first parent of origin/{branch} is not an ancestor of current origin/develop."
+        ) from error
+    try:
+        merge_tree = _git("merge-tree", "--write-tree", parent_line[1], release_commit, repo=repo).splitlines()[0]
+    except (subprocess.CalledProcessError, IndexError) as error:
+        raise BackmergeConflictError(f"Could not reproduce the merge tree for origin/{branch}.") from error
+    actual_tree = _git("rev-parse", f"{remote_tip}^" + "{tree}", repo=repo)
+    if merge_tree != actual_tree:
+        raise BackmergeConflictError(
+            f"origin/{branch} has tree {actual_tree}, not deterministic merge tree {merge_tree}."
+        )
+    raw_prs = _run_checked(
+        (
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "all",
+            "--head",
+            branch,
+            "--json",
+            "number,state,headRefOid,baseRefName,headRefName",
+        ),
+        repo,
+    )
+    prs = json.loads(raw_prs)
+    if isinstance(prs, list) and not prs:
+        return False
+    if (
+        not isinstance(prs, list)
+        or len(prs) != 1
+        or not isinstance(prs[0], dict)
+        or prs[0].get("state") != "OPEN"
+        or prs[0].get("baseRefName") != "develop"
+        or prs[0].get("headRefName") != branch
+        or prs[0].get("headRefOid") != remote_tip
+    ):
+        raise BackmergeConflictError(f"origin/{branch} has mismatched or non-open pull-request state.")
+    return True
+
+
+def _create_backmerge_pull_request(branch: str, tag: str, repo: Path) -> None:
+    """Open the one expected release backmerge pull request."""
+    _run_checked(
+        (
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            "develop",
+            "--head",
+            branch,
+            "--title",
+            f"chore: backmerge {tag} into develop",
+            "--body",
+            f"Backmerge the released main branch into develop after {tag}.",
+        ),
+        repo,
+    )
+
+
+def open_release_backmerge(version_text: str, commit: str, repo: Path = REPO_ROOT) -> bool:
+    """Create a non-destructive release backmerge or verify its safe rerun."""
+    version = ReleaseVersion.from_python(version_text.removeprefix("v"))
+    release_commit, tag = _require_released_commit(version, commit, repo)
+    branch = f"backmerge/{tag}"
+    remote = _run_process(("git", "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}"), repo)
+    if remote.returncode == 0:
+        if not _verify_existing_backmerge(branch, release_commit, repo):
+            _create_backmerge_pull_request(branch, tag, repo)
+            return True
+        return False
+    if remote.returncode != 2:
+        raise RepositoryStateError(f"Could not determine whether origin/{branch} exists: {remote.stderr.strip()}")
+    try:
+        _git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}", repo=repo)
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise BackmergeConflictError(f"Local branch {branch} already exists without a remote counterpart.")
+    if _git("status", "--porcelain", repo=repo):
+        raise RepositoryStateError("The working tree must be clean before creating a backmerge.")
+    _git("fetch", "origin", "develop", repo=repo)
+    _git("checkout", "-b", branch, "origin/develop", repo=repo)
+    try:
+        _git("merge", "--no-ff", "--no-edit", release_commit, repo=repo)
+    except subprocess.CalledProcessError as error:
+        raise BackmergeConflictError(
+            f"Backmerge conflicts were preserved on {branch}; resolve them and continue manually."
+        ) from error
+    merge_line = _git("rev-list", "--parents", "-n", "1", "HEAD", repo=repo).split()
+    if len(merge_line) != 3 or merge_line[2] != release_commit:
+        raise BackmergeConflictError("Git did not create the expected two-parent backmerge commit.")
+    _git("push", "origin", branch, repo=repo)
+    _create_backmerge_pull_request(branch, tag, repo)
+    return True
+
+
 def _parser() -> argparse.ArgumentParser:
     """Build the release command parser."""
     parser = argparse.ArgumentParser(prog="release")
@@ -907,9 +1356,9 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("version")
     commands.add_parser("validate")
     build = commands.add_parser("build")
+    build.add_argument("--kind", required=True, choices=tuple(kind.value for kind in BuildKind))
     build.add_argument("--target")
     build.add_argument("--interpreter")
-    build.add_argument("--sdist", action="store_true")
     build.add_argument("--out-dir", type=Path, default=Path("dist"))
     notes = commands.add_parser("extract-notes")
     notes.add_argument("version")
@@ -924,7 +1373,66 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("index", choices=("testpypi", "pypi"))
     verify.add_argument("manifest", type=Path)
     verify.add_argument("--allow-missing", action="store_true")
+    identity = commands.add_parser("resolve-identity")
+    identity.add_argument("--event-kind", required=True, choices=tuple(kind.value for kind in ReleaseEventKind))
+    identity.add_argument("--commit", required=True)
+    identity.add_argument("--branch")
+    identity.add_argument("--version")
+    identity.add_argument("--tag")
+    identity.add_argument("--output", required=True, type=Path)
+    crate = commands.add_parser("crate-state")
+    crate.add_argument("crate_name")
+    crate.add_argument("version")
+    crate.add_argument("archive", type=Path)
+    crate.add_argument("output", type=Path)
+    github_release = commands.add_parser("github-release")
+    github_release.add_argument("tag")
+    github_release.add_argument("commit")
+    github_release.add_argument("title")
+    github_release.add_argument("notes", type=Path)
+    github_release.add_argument("manifest", type=Path)
+    github_release.add_argument("artifact_dir", type=Path)
+    backmerge = commands.add_parser("backmerge")
+    backmerge.add_argument("version")
+    backmerge.add_argument("commit")
     return parser
+
+
+def _run_external_release_command(args: argparse.Namespace) -> None:
+    """Dispatch commands that integrate with release orchestration boundaries."""
+    if args.command == "resolve-identity":
+        identity = resolve_release_identity(
+            ReleaseEventKind(args.event_kind),
+            args.commit,
+            branch=args.branch,
+            version_text=args.version,
+            tag=args.tag,
+        )
+        write_release_identity(identity, args.output)
+    elif args.command == "crate-state":
+        state = inspect_crate_version(
+            args.crate_name,
+            ReleaseVersion.from_python(args.version.removeprefix("v")),
+            args.archive,
+        )
+        write_crate_state(state, args.output)
+        if state is CrateVersionState.CONFLICT:
+            raise RegistryConflictError(
+                f"crates.io already contains a conflicting immutable {args.crate_name} {args.version} archive."
+            )
+    elif args.command == "github-release":
+        ensure_immutable_github_release(
+            args.tag,
+            args.commit,
+            args.title,
+            args.notes,
+            args.manifest,
+            args.artifact_dir,
+        )
+    elif args.command == "backmerge":
+        open_release_backmerge(args.version, args.commit)
+    else:
+        raise AssertionError(f"Unhandled release command {args.command!r}.")
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -936,7 +1444,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         elif args.command == "validate":
             validate_release()
         elif args.command == "build":
-            build_release(args.out_dir, args.target, args.interpreter, args.sdist)
+            build_release(args.out_dir, BuildKind(args.kind), args.target, args.interpreter)
         elif args.command == "extract-notes":
             version = ReleaseVersion.from_python(args.version)
             notes = extract_release_notes(CHANGELOG_PATH.read_text(encoding="utf-8"), version)
@@ -948,7 +1456,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         elif args.command == "verify-index":
             verify_release_index(args.index, args.manifest, args.allow_missing)
         else:
-            raise AssertionError(f"Unhandled release command {args.command!r}.")
+            _run_external_release_command(args)
     except (ReleaseError, subprocess.CalledProcessError, OSError, json.JSONDecodeError) as error:
         print(f"release: {error}", file=sys.stderr)
         return 1

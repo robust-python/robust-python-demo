@@ -27,7 +27,7 @@ jobs:
             runner: ubuntu-latest
             python: "3.14"
             artifact-kind: all
-            command: uv run --locked nox -s build-release -- --sdist --out-dir dist
+            command: uv run --locked nox -s build-release -- --kind all --out-dir dist
 
     steps:
       - name: Check out the exact release commit
@@ -46,13 +46,6 @@ jobs:
 
       - name: Build and smoke-test the release artifact
         run: ${{ matrix.command }}
-
-      - name: Keep only the source distribution for the source cell
-        if: matrix.artifact-kind == 'sdist'
-        run: python -c "from pathlib import Path; [path.unlink() for path in Path('dist').glob('*.whl')]"
-
-      - name: Remove the per-cell manifest
-        run: python -c "from pathlib import Path; Path('dist/release-artifacts.json').unlink()"
 
       - name: Upload the checked artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
