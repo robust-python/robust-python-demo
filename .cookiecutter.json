@@ -1,5 +1,5 @@
 {
-  "_commit": "30a81091e8f639e68d177516bea1ad8c4bb44bbc",
+  "_commit": "cdb936684306c8a8017bf60e457737b31177dd15",
   "_max_python_version_minor_int": 14,
   "_min_python_version_minor_int": 10,
   "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
@@ -28,5 +28,6 @@
   "rust_package_name": "robust_python_demo_core",
   "rust_project_name": "robust-python-demo-core",
   "rust_python_abi": "abi3",
+  "rust_version": "1.83",
   "version": "0.0.0"
 }

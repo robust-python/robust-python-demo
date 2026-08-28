@@ -33,6 +33,8 @@ Chosen option: **Protected GitHub finalization after a locally prepared release 
 
 Maintainers prepare `release/<version>` from `develop` with Nox. Pull-request CI validates and builds without write credentials. After merge, GitHub Actions builds the exact merge commit once, publishes and verifies it on TestPyPI, creates an annotated tag, publishes to the configured production registries, creates the GitHub release, and opens a backmerge pull request.
 
+Release builds validate source distributions as consumer inputs. The local build interface safely unpacks each sdist into a temporary directory, builds a wheel from that unpacked tree, installs it without dependencies, and runs the same import and native-extension smoke test used for directly built wheels.
+
 The workflow records artifact hashes before publication. A rerun skips an existing registry file only when it matches that manifest. A conflict requires a new version. Manual dispatch and a maintainer-pushed annotated tag are recovery triggers, not alternate publication authorities.
 
 ### Consequences
@@ -40,16 +42,18 @@ The workflow records artifact hashes before publication. A rerun skips an existi
 - Good, because pull-request code cannot access registry identities.
 - Good, because TestPyPI verifies the production artifact set before the production tag exists.
 - Good, because PyPI receives the files that passed TestPyPI verification.
+- Good, because the sdist must contain enough Python, Rust, lockfile, metadata, and license material to build outside the repository checkout.
 - Good, because protected environments can require approval at each irreversible boundary.
 - Good, because the changelog committed with the release is the GitHub release-note source.
 - Bad, because a release uses several sequential jobs and can take longer than direct publication.
+- Bad, because rebuilding and smoke-testing the sdist adds another native build to release validation.
 - Bad, because TestPyPI filename conflicts require a new release version.
 - Neutral, because GitHub is the first release orchestrator while Nox remains the vendor-neutral local interface.
 - Bad, because GitLab and Bitbucket retain local validation and build interfaces but no generated publication workflow.
 - Bad, because publication is not atomic: the tag and Rust crate can exist before a later PyPI failure.
 - Bad, because workflow artifacts expire and a byte-identical recovery rebuild is not guaranteed.
 - Bad, because protected-environment reviewers are unavailable for private repositories on some GitHub plans.
-- Bad, because immutable action pins, native build minutes, macOS and preview ARM runners, and retained artifacts add operating cost.
+- Bad, because action version-tag maintenance, native build minutes, macOS and preview ARM runners, and retained artifacts add operating cost.
 - Bad, because the custom release tool and its narrow metadata and registry parsers require continued maintenance.
 - Neutral, because the hash manifest is an integrity check, not signed provenance, an SBOM, or an artifact attestation.
 

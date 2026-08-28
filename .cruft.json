@@ -1,6 +1,6 @@
 {
   "template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-  "commit": "30a81091e8f639e68d177516bea1ad8c4bb44bbc",
+  "commit": "cdb936684306c8a8017bf60e457737b31177dd15",
   "checkout": null,
   "context": {
     "cookiecutter": {
@@ -12,6 +12,7 @@
       "add_rust_extension": false,
       "rust_project_name": "robust-python-demo-core",
       "rust_package_name": "robust_python_demo_core",
+      "rust_version": "1.83",
       "rust_python_abi": "abi3",
       "publish_rust_package": false,
       "author": "Kyle Oliver",
@@ -24,7 +25,7 @@
       "license": "MIT",
       "development_status": "Development Status :: 1 - Planning",
       "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-      "_commit": "30a81091e8f639e68d177516bea1ad8c4bb44bbc",
+      "_commit": "cdb936684306c8a8017bf60e457737b31177dd15",
       "_min_python_version_minor_int": 10,
       "_max_python_version_minor_int": 14,
       "python_versions": [

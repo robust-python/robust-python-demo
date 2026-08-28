@@ -16,6 +16,8 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
+
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,7 +34,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "commitizen>=4.7.0",
+    "commitizen>=4.13.0",
     "nox>=2025.5.1",
     "pre-commit>=4.2.0",
     "pre-commit-hooks>=5.0.0",

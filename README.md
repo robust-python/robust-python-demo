@@ -73,7 +73,7 @@ This project uses a robust set of tools for development, testing, and quality as
 
 Explore the `noxfile.py` and the project documentation for detailed information on the automated workflow.
 
-Maintainers use the protected [release procedure](docs/releasing.md) to validate on TestPyPI, publish the same artifacts, and backmerge `main` into `develop`.
+Maintainers use the [release procedure](docs/releasing.md) to prepare version and changelog changes with Commitizen, validate the artifacts locally or in CI, and publish from an annotated release tag. TestPyPI remains available as an optional rehearsal.
 
 ## Contributing
 
