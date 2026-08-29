@@ -1,0 +1,113 @@
+# Releasing
+
+This project uses one release process locally and in GitHub Actions. A release pull request validates code that has no registry credentials. Publication starts only after GitHub merges that pull request into `main`.
+
+## Repository setup
+
+Complete this setup before the first release.
+
+1. Protect the `main` and `develop` branches.
+   - Require pull requests and required checks.
+   - Prevent force pushes and deletion.
+   - Permit the release workflow to create `backmerge/*` branches.
+2. Add a `v*` tag ruleset.
+   - Prevent update and deletion of release tags.
+   - GitHub cannot grant bypass to a workflow-file identity. Ruleset bypass is actor- or app-based.
+   - Gate normal automation through the `release-tag` environment and allow designated maintainers to create recovery tags.
+   - See [GitHub's ruleset documentation](https://docs.github.com/en/organizations/managing-organization-settings/creating-rulesets-for-repositories-in-your-organization).
+3. Create these GitHub environments:
+
+   - `testpypi`
+   - `release-tag`
+   - `pypi`
+
+4. Add required reviewers and deployment-branch restrictions to each environment.
+   - Required reviewers for private repositories are unavailable on some GitHub plans. Confirm the features available to the organization in [GitHub's environment documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+5. Configure trusted publishers.
+
+   - On TestPyPI and PyPI, select this GitHub repository, `finalize-release.yml`, and the matching environment name.
+
+6. In **Settings > Actions > General**, allow GitHub Actions to create pull requests.
+   - The backmerge uses the ephemeral `GITHUB_TOKEN`.
+   - Workflows started by its pull request require maintainer approval. See [repository Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository) and [workflow trigger behavior](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+The release matrix uses `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-15-intel`,
+`macos-15`, and `windows-latest`. GitHub documents Linux ARM hosted runners as
+public preview. Runner availability, architecture, private-repository billing,
+and included minutes can change; review the [hosted runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) before enabling required checks.
+
+Release bundles are retained for 30 days. The native matrix and retained bundle
+consume Actions minutes and artifact storage. Dependabot updates the immutable
+action revisions used by every generated GitHub workflow.
+
+The workflows use GitHub OpenID Connect tokens. Do not add long-lived PyPI or crates.io tokens.
+
+## Prepare a release
+
+Start from a clean `develop` branch.
+
+```console
+git switch develop
+git pull --ff-only
+uv run --locked nox -s prepare-release -- <increment-or-version>
+```
+
+The command creates `release/<version>`, synchronizes the Python and Cargo metadata, updates `CHANGELOG.md`, validates the result, and creates the release preparation commit. It stages only release-owned metadata and lockfiles. If preparation fails, it leaves the branch and generated evidence in place for inspection; it does not reset, clean, switch branches, or delete the release branch. Push the branch and open a pull request into `main`.
+
+The **Release Check** workflow performs the same validation. It also builds and smoke-tests every release artifact. It cannot tag or publish.
+
+## Finalize a release
+
+Merge the release pull request after its required checks pass. The **Finalize Release** workflow then performs these operations in order:
+
+1. Validate the exact merge commit.
+2. Build the complete artifact matrix once for that workflow run.
+3. Publish the files to TestPyPI and verify their names, metadata, and hashes.
+4. Create annotated tag `v<version>` at the validated commit.
+5. Publish the configured crates.io package.
+6. Publish the same Python files to PyPI.
+7. Create the GitHub release from the committed changelog section.
+8. Open a `main` to `develop` backmerge pull request.
+
+TestPyPI is a required gate. A TestPyPI failure stops tag creation and every production publication.
+
+With `abi3`, each platform produces one wheel by accepting Python's limited API.
+With `cpython`, each platform produces one wheel for every configured Python
+version. Each native wheel is installed and smoke-tested on its build runner.
+Registry verification later installs only a wheel compatible with the verification
+runner; it verifies every other downloaded file by filename, metadata, size, and
+hash.
+
+Publication across services is not atomic. The tag and, when enabled, the Rust
+crate can exist before a later PyPI failure. The workflow intentionally does not
+create the GitHub Release until all configured production registries succeed.
+
+## Recovery
+
+Rerun the failed job after you correct an environment or service problem. Each registry check permits an existing file only when its filename, version, metadata, and hash match the release manifest. If an immutable registry file conflicts, stop and prepare a new version.
+
+Use the **Finalize Release** manual dispatch when the automatic run cannot resume. Supply the version without `v` and the full 40-character commit ID. A maintainer can also push an annotated `v*` tag at the validated commit to start the recovery path. Both routes repeat validation and TestPyPI verification.
+
+Use these failure-specific rules:
+
+- **Build or validation failure:** Correct the release branch and update the release pull request. Do not publish manually.
+- **TestPyPI failure before tag creation:** Correct the environment or trusted publisher, then rerun. If TestPyPI contains a conflicting file, use a new version.
+- **Tag failure:** Confirm the `release-tag` environment and tag ruleset. Never move or replace an existing release tag.
+- **crates.io or PyPI failure:** Keep the tag. Correct the publisher configuration and rerun from the same commit. Reuse the retained release bundle.
+- **Expired release bundle:** Rebuild from the exact commit. Existing registry files must match the rebuilt filenames, metadata, and hashes. Nondeterministic bytes can require a new version.
+- **GitHub release failure:** Rerun after all configured registries contain matching artifacts. An existing release must match the exact tag target, title, changelog note bytes, and complete asset set; automation never edits or clobbers it.
+- **Backmerge conflict:** Merge `main` into a branch based on `develop`, resolve the conflict locally, and open the backmerge pull request manually.
+- **Automation pull request waits for checks:** Approve the GitHub Actions run for the backmerge pull request. The workflow intentionally uses `GITHUB_TOKEN` instead of a personal token or GitHub App.
+
+For local tag recovery, validate the exact target before you push it:
+
+```console
+uv run --locked nox -s finalize-release -- <version> <full-commit-id>
+git push origin refs/tags/v<version>
+```
+
+Do not use local registry publication as a recovery shortcut. The protected workflow owns TestPyPI, PyPI, crates.io, and GitHub release publication.
+
+The release manifest proves file identity and integrity. It is not signed
+provenance, an SBOM, or a GitHub artifact attestation. See [GitHub's artifact
+attestation documentation](https://docs.github.com/en/actions/concepts/security/artifact-attestations) if those controls become requirements.

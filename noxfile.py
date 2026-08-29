@@ -1,11 +1,13 @@
 """Noxfile for the robust-python-demo project."""
 
 import os
+import re
 import shlex
 import shutil
 from pathlib import Path
 from textwrap import dedent
 from typing import List
+from typing import Pattern
 
 import nox
 from nox.command import CommandFailed
@@ -21,12 +23,20 @@ DEFAULT_PYTHON_VERSION: str = PYTHON_VERSIONS[-1]
 REPO_ROOT: Path = Path(__file__).parent.resolve()
 TESTS_FOLDER: Path = REPO_ROOT / "tests"
 SCRIPTS_FOLDER: Path = REPO_ROOT / "scripts"
-CRATES_FOLDER: Path = REPO_ROOT / "rust"
+RUST_MANIFEST: Path = REPO_ROOT / "rust" / "Cargo.toml"
+RUST_CORE_MANIFEST: Path = REPO_ROOT / "rust" / "core" / "Cargo.toml"
+RUST_PYTHON_MANIFEST: Path = REPO_ROOT / "rust" / "python" / "Cargo.toml"
+RUST_VERSION: str = "1.83"
+
+RELEASE_BRANCH_RE: Pattern[str] = re.compile(r"^(release|hotfix)/")
+DEFAULT_BASE: str = "origin/develop"
+TAG_PREFIX: str = "v"
+DIST_DIR: str = "dist"
 
 PROJECT_NAME: str = "robust-python-demo"
 PACKAGE_NAME: str = "robust_python_demo"
 REPOSITORY_HOST: str = "github.com"
-REPOSITORY_PATH: str = "56kyle/robust-python-demo"
+REPOSITORY_PATH: str = "robust-python/robust-python-demo"
 
 ENV: str = "env"
 FORMAT: str = "format"
@@ -56,7 +66,7 @@ def setup_git(session: Session) -> None:
 @nox.session(python=False, name="setup-remote")
 def setup_remote(session: Session) -> None:
     """Set up the remote repository for the current project."""
-    command: list[str] = [
+    command: list[str | Path] = [
         "python",
         SCRIPTS_FOLDER / "setup-remote.py",
         REPO_ROOT,
@@ -136,6 +146,38 @@ def tests_python(session: Session) -> None:
         f"--junitxml={junitxml_file}",
         "tests/",
     )
+
+
+@nox.session
+def doctor(session: nox.Session) -> None:
+    """Verify local/CI parity preconditions (history, tags, tool versions)."""
+    _ensure_full_history(session)
+    _fetch_tags(session)
+    session.run("uvx", "--from", "commitizen", "cz", "version")
+    session.run("cargo", "--version", external=True)
+    branch: str = _current_branch(session)
+    last_tag: str = _git(session, "describe", "--tags", "--abbrev=0") or "<no tags yet>"
+    session.log(f"branch={branch}  last_tag={last_tag}")
+    dirty: bool = bool(_git(session, "status", "--porcelain"))
+    session.log("working tree: " + ("DIRTY (fine for now, blocks release)" if dirty else "clean"))
+
+
+@nox.session
+def check_commits(session: nox.Session) -> None:
+    """Lint commit messages (MR/PR gate).
+
+    Usage: `nox -s check_commits`               -> origin/develop..HEAD
+           `nox -s check_commits -- origin/main..HEAD`
+    """
+    rev_range: str = session.posargs[0] if session.posargs else f"{DEFAULT_BASE}..HEAD"
+    session.run("uvx", "--from", "commitizen", "cz", "check", "--rev-range", rev_range)
+
+
+@nox.session
+def changelog_preview(session: nox.Session) -> None:
+    """Preview the changelog section that the next bump would append."""
+    _fetch_tags(session)
+    session.run("uvx", "--from", "commitizen", "cz", "changelog", "--incremental", "--dry-run", *session.posargs)
 
 
 @nox.session(python=DEFAULT_PYTHON_VERSION, name="build-docs", tags=[DOCS, BUILD])
@@ -219,36 +261,159 @@ def build_container(session: Session) -> None:
     session.log(f"Container image {project_image_name}:latest built locally.")
 
 
-@nox.session(python=False, name="setup-release", tags=[RELEASE])
-def setup_release(session: Session) -> None:
-    """Prepares a release by creating a release branch and bumping the version.
+def _run_release_tool(session: Session, command: str) -> None:
+    """Delegate one provider-neutral release command to its local CLI."""
+    base_command: list[str] = ["uv", "run", "--locked", "python", "-m", "scripts.release_tools"]
+    session.run(*base_command, command, *session.posargs, external=True)
 
-    Additionally, creates the initial bump commit but doesn't push it.
+
+@nox.session(python=False, name="release-start")
+def release_start(session: nox.Session) -> None:
+    """Create release/X.Y.Z from the current branch (run this on develop)."""
+    _ensure_full_history(session)
+    _fetch_tags(session)
+    _ensure_clean_tree(session)
+    branch: str = _current_branch(session)
+    if branch != "develop":
+        session.warn(f"Cutting a release from '{branch}', not 'develop' — make sure that's intended.")
+    version: str = _next_version(session)
+    release_branch: str = f"release/{version}"
+    session.run("git", "switch", "-c", release_branch, external=True)
+    session.log(f"Created {release_branch}. Next: `nox -s release_preview`, then release_rc / release_final.")
+
+
+@nox.session(python=False, name="release-preview")
+def release_preview(session: nox.Session) -> None:
+    """Dry-run the bump: shows increment, next version, and files touched."""
+    _ensure_full_history(session)
+    _fetch_tags(session)
+    session.run("uvx", "--from", "commitizen", "cz", "bump", "--dry-run", *session.posargs)
+
+
+@nox.session(python=False, name="release-rc")
+def release_rc(session: nox.Session) -> None:
+    """Tag a release candidate on the release branch (1.2.0-rc.1, -rc.2, ...)."""
+    _release_preflight(session)
+    push, forwarded = _split_local_flags(session.posargs)
+    session.run("uvx", "--from", "commitizen", "cz", "bump", "--prerelease", "rc", *forwarded)
+    if push:
+        _push_with_tags(session)
+
+
+@nox.session(python=False, name="release-final")
+def release_final(session: nox.Session) -> None:
+    """Final bump: writes Cargo.toml/Cargo.lock + CHANGELOG.md, commits, tags, pushes.
+
+    Finalizing after RCs with no new commits? `nox -s release_final -- --allow-no-commit`.
+    Forcing an increment: `nox -s release_final -- --increment PATCH`.
     """
-    session.log("Setting up release...")
+    _release_preflight(session)
+    push, forwarded = _split_local_flags(session.posargs)
+    session.run("uvx", "--from", "commitizen", "cz", "bump", *forwarded)
+    if push:
+        _push_with_tags(session)
+    session.log(
+        "Done. Remember the gitflow tail: merge this branch --no-ff into master, "
+        "then back-merge master into develop (mandatory with the cargo provider)."
+    )
 
-    session.run("python", SCRIPTS_FOLDER / "setup-release.py", *session.posargs, external=True)
 
+@nox.session(python=False, name="release-notes")
+def release_notes(session: nox.Session) -> None:
+    """Write one version's changelog section to release_notes.md.
 
-@nox.session(python=False, name="get-release-notes", tags=[RELEASE])
-def get_release_notes(session: Session) -> None:
-    """Gets the latest release notes if between bumping the version and tagging the release."""
-    session.log("Getting release notes...")
-    session.run("python", SCRIPTS_FOLDER / "get-release-notes.py", *session.posargs, external=True)
-
-
-@nox.session(python=False, name="publish-python", tags=[RELEASE])
-def publish_python(session: Session) -> None:
-    """Publish sdist and wheel packages to PyPI via uv publish.
-
-    Requires packages to be built first (`nox -s build-python` or `nox -s build`).
-    Requires TWINE_USERNAME/TWINE_PASSWORD or TWINE_API_KEY environment variables set (usually in CI).
+    Usage: `nox -s release_notes -- 1.2.0` (or v1.2.0). Defaults to the latest tag.
+    Feed the file to your forge's release-creation step.
     """
-    session.log("Checking built packages with Twine.")
-    session.run("uvx", "twine", "check", "dist/*")
+    _fetch_tags(session)
+    if session.posargs:
+        version: str = session.posargs[0]
+    else:
+        version: str = _git(session, "describe", "--tags", "--abbrev=0")
+        if not version:
+            session.error("No tags found and no version given.")
+    version: str = version.removeprefix(TAG_PREFIX)
+    notes: str | bool | None = session.run(
+        "uvx", "--from", "commitizen", "cz", "changelog", version, "--dry-run", silent=True
+    )
+    if not isinstance(notes, str):
+        raise ValueError(f"Failed to retrieve release notes from commitizen.")
+    out_path: Path = Path("release_notes.md")
+    out_path.write_text(notes, encoding="utf-8")
+    session.log(f"Wrote {out_path} ({len(notes.splitlines())} lines) for version {version}.")
 
-    session.log("Publishing packages to PyPI.")
-    session.run("uv", "publish", "dist/*", *session.posargs, external=True)
+
+def _ensure_release_tag(session: nox.Session) -> str:
+    """Publishing guard: HEAD must sit exactly on a final (non-rc) version tag."""
+    tag: str = _git(session, "describe", "--tags", "--exact-match")
+    if not tag:
+        session.error("HEAD is not on a tag. Publishing is tag-triggered — check out the tag first.")
+    if "-rc" in tag:
+        session.error(f"{tag} is a release candidate; not publishing to immutable registries.")
+    return tag
+
+
+@nox.session(python=False, name="build-rust")
+def build_rust(session: nox.Session) -> None:
+    """Package and verify the crate (writes target/package/*.crate)."""
+    session.run("cargo", "package", "--locked", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="build-python")
+def build_python(session: nox.Session) -> None:
+    """Builds the Python package into `./dist`.
+
+    Builds for the current interpreter by default. To cover every supported
+    CPython (3.10–3.14) installed on the machine, forward maturin's flag:
+    `nox -s build_python -- --find-interpreter`. (If the crate uses PyO3's
+    abi3-py310 feature, one wheel per platform already covers 3.10+ and
+    --find-interpreter is unnecessary.)
+    """
+    session.run("maturin", "build", "--release", "--out", DIST_DIR, *session.posargs)
+    session.run("maturin", "sdist", "--out", DIST_DIR)
+
+
+@nox.session(python=False, name="build")
+def build(session: nox.Session) -> None:
+    """Umbrella: build the crate package, this platform's wheels, and the sdist."""
+    session.notify("build-rust")
+    session.notify("build-python")
+
+
+@nox.session(python=False, name="publish-rust")
+def publish_rust(session: nox.Session) -> None:
+    """Publish the crate to crates.io. Requires CARGO_REGISTRY_TOKEN.
+
+    Run on the tagged commit (guard enforces it); rc tags are refused.
+    """
+    _ensure_release_tag(session)
+    session.run("cargo", "publish", "--locked", *session.posargs, external=True)
+
+
+@nox.session(python=False, name="publish-python")
+def publish_python(session: nox.Session) -> None:
+    """Upload everything in ./dist (wheels + sdist) to PyPI.
+
+    Artifact-passing model: build first — locally via build_wheels/build_sdist,
+    or in CI by downloading the wheel-matrix artifacts into ./dist — then this
+    session uploads the lot. Requires MATURIN_PYPI_TOKEN (or PyPI trusted
+    publishing on a supported CI). --skip-existing makes retries idempotent.
+    """
+    _ensure_release_tag(session)
+    artifacts: list[str] = sorted(str(path) for path in Path(DIST_DIR).glob("*") if path.is_file())
+    if not artifacts:
+        session.error(
+            f"No artifacts in ./{DIST_DIR}. Run build_wheels/build_sdist first, "
+            "or download the CI wheel-matrix artifacts into ./dist."
+        )
+    session.run("uvx", "maturin", "upload", "--skip-existing", *artifacts, *session.posargs)
+
+
+@nox.session(python=False, name="publish")
+def publish(session: nox.Session) -> None:
+    """Publishes both the Python and Rust packages."""
+    session.notify("publish-rust")
+    session.notify("publish-python")
 
 
 @nox.session(python=False)
@@ -310,6 +475,109 @@ def coverage(session: Session) -> None:
     session.run("coverage", "report")
 
     session.log(f"Coverage reports generated in ./{coverage_html_dir} and terminal.")
+
+
+def _git(session: nox.Session, *args: str) -> str:
+    """Run a git command and return its stdout (stripped)."""
+    out: str | bool | None = session.run("git", *args, external=True, silent=True)
+    if isinstance(out, str):
+        return out.strip()
+    return ""
+
+
+def _current_branch(session: nox.Session) -> str:
+    branch: str = _git(session, "rev-parse", "--abbrev-ref", "HEAD")
+    if not branch:
+        raise RuntimeError(f"Failed to get current branch.")
+    return branch
+
+
+def _ensure_clean_tree(session: nox.Session) -> None:
+    if _git(session, "status", "--porcelain"):
+        session.error(
+            "Working tree is not clean. `cz bump` commits and tags whatever it "
+            "finds — commit or stash your changes first."
+        )
+
+
+def _ensure_full_history(session: nox.Session) -> None:
+    if _git(session, "rev-parse", "--is-shallow-repository") == "true":
+        session.error(
+            "Shallow clone detected. Commitizen computes the increment and "
+            "changelog from history since the last tag; a shallow clone gives "
+            "DIFFERENT results than a full one. Locally: `git fetch --unshallow "
+            "--tags`. GitHub: fetch-depth: 0. GitLab: GIT_DEPTH: 0. "
+            "Bitbucket: clone depth 'full'."
+        )
+
+
+def _fetch_tags(session: nox.Session) -> None:
+    """Best-effort tag sync so local and CI see the same 'latest version'."""
+    try:
+        session.run("git", "fetch", "--tags", "--quiet", external=True)
+    except Exception:
+        session.warn("Could not fetch tags (offline?) — proceeding with local tags.")
+
+
+def _ensure_release_branch(session: nox.Session) -> str:
+    branch: str = _current_branch(session)
+    if not RELEASE_BRANCH_RE.match(branch):
+        session.error(
+            f"Refusing to bump on '{branch}'. Releases happen on release/* or "
+            "hotfix/* branches (gitflow Variant A). Use `nox -s release_start` "
+            "first, or check out the branch you meant."
+        )
+    return branch
+
+
+def _release_preflight(session: nox.Session) -> None:
+    _ensure_full_history(session)
+    _fetch_tags(session)
+    _ensure_clean_tree(session)
+    _ensure_release_branch(session)
+
+
+def _split_local_flags(posargs: list[str]) -> tuple[bool, list[str]]:
+    """Extract flags this noxfile owns (--no-push); forward the rest to cz."""
+    push: bool = "--no-push" not in posargs
+    return push, [arg for arg in posargs if arg != "--no-push"]
+
+
+def _push_with_tags(session: nox.Session) -> None:
+    session.run("git", "push", "--follow-tags", external=True)
+
+
+def _next_version(session: nox.Session) -> str:
+    """Ask commitizen for the next version without changing anything.
+
+    Prefers `cz bump --get-next`; falls back to parsing `--dry-run` output for
+    older commitizen versions or configs where --get-next is restricted.
+    """
+    try:
+        out: str | bool | None = session.run(
+            "uvx", "--from", "commitizen", "cz", "bump", "--get-next", silent=True
+        )
+        version = (out or "").strip().splitlines()[-1].strip()
+        if version:
+            return version
+    except Exception:
+        pass
+
+
+def _next_version_fallback(session: nox.Session) -> str:
+    """Gets the next version using the --dry-run fallback from commitizen."""
+    out: str | bool | None = session.run(
+        "uvx", "--from", "commitizen", "cz", "bump", "--dry-run", silent=True, success_codes=[0]
+    )
+    if not isinstance(out, str):
+        raise RuntimeError(f"Failed to get next version from commitizen.")
+    match: re.Match | None = re.search(r"tag to create:\s*\S*?(\d[\w.\-+]*)\s*$", out, re.MULTILINE)
+    if not match:
+        session.error(
+            "Could not determine the next version. Are there any bumpable "
+            "(feat/fix/BREAKING) commits since the last tag?"
+        )
+    return match.group(1)
 
 
 def activate_virtualenv_in_precommit_hooks(session: Session) -> None:

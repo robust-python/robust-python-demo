@@ -43,17 +43,6 @@ repos:
         args: [--fix, --diff, --exit-non-zero-on-fix, --config=.ruff.toml]
         name: Ruff Check
 
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: master
-    hooks:
-      - id: fmt
-        name: Rust Format
-      - id: clippy
-        args: ["--all-features", "--", "--write"]
-        name: Clippy
-      - id: cargo-check
-        name: Cargo Check
-
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v2.6.0
     hooks:

@@ -1,0 +1,233 @@
+name: Finalize Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+      commit:
+        description: Exact commit to release; defaults to the selected ref
+        required: false
+        type: string
+
+concurrency:
+  group: finalize-release-${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
+    name: Resolve immutable release identity
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release-pr.outputs.version || steps.release-dispatch.outputs.version || steps.release-tag.outputs.version }}
+      cargo_version: ${{ steps.release-pr.outputs.cargo_version || steps.release-dispatch.outputs.cargo_version || steps.release-tag.outputs.cargo_version }}
+      commit: ${{ steps.release-pr.outputs.commit || steps.release-dispatch.outputs.commit || steps.release-tag.outputs.commit }}
+      tag: ${{ steps.release-pr.outputs.tag || steps.release-dispatch.outputs.tag || steps.release-tag.outputs.tag }}
+    steps:
+      - name: Check out the requested release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Resolve merged pull request identity
+        id: release-pr
+        if: github.event_name == 'pull_request'
+        run: uv run --locked nox -s resolve-release-identity -- --event-kind pull_request --commit "${{ github.event.pull_request.merge_commit_sha }}" --branch "${{ github.event.pull_request.head.ref }}" --output "$GITHUB_OUTPUT"
+
+      - name: Resolve manual-dispatch identity
+        id: release-dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: uv run --locked nox -s resolve-release-identity -- --event-kind workflow_dispatch --commit "${{ inputs.commit || github.sha }}" --version "${{ inputs.version }}" --output "$GITHUB_OUTPUT"
+
+      - name: Resolve pushed-tag identity
+        id: release-tag
+        if: github.event_name == 'push'
+        run: uv run --locked nox -s resolve-release-identity -- --event-kind push --commit "${{ github.sha }}" --tag "${{ github.ref_name }}" --output "$GITHUB_OUTPUT"
+
+  validate:
+    name: Revalidate the release commit
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Validate versions, locks, changelog, and tag state
+        env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: uv run --locked nox -s validate-release
+
+  build:
+    name: Build immutable release artifacts
+    needs: [resolve, validate]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      ref: ${{ needs.resolve.outputs.commit }}
+      artifact-prefix: release-final
+
+  bundle:
+    name: Assemble release bundle
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Download every native artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-final-*
+          path: dist
+          merge-multiple: true
+
+      - name: Reject duplicate or invalid distributions
+        run: uv run --locked twine check dist/*.whl dist/*.tar.gz
+
+      - name: Create the immutable artifact manifest
+        run: uv run --locked nox -s write-artifact-manifest -- dist release-artifacts.json
+
+      - name: Upload the immutable release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-bundle-${{ needs.resolve.outputs.tag }}
+          path: |
+            dist/
+            release-artifacts.json
+          if-no-files-found: error
+          retention-days: 30
+
+  testpypi:
+    name: Publish and verify TestPyPI
+    needs: [resolve, bundle]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Download the immutable release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-bundle-${{ needs.resolve.outputs.tag }}
+
+      - name: Publish to TestPyPI
+        run: >-
+          uv publish dist/* --trusted-publishing always
+          --publish-url https://test.pypi.org/legacy/
+          --check-url https://test.pypi.org/simple/
+
+      - name: Verify TestPyPI filenames, metadata, and hashes
+        env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: uv run --locked nox -s verify-release-index -- testpypi release-artifacts.json
+
+  tag:
+    name: Create the protected release tag
+    needs: [resolve, testpypi]
+    runs-on: ubuntu-latest
+    environment: release-tag
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.resolve.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Create or verify the annotated tag
+        run: uv run --locked nox -s finalize-release -- "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.commit }}"
+
+      - name: Push the release tag
+        run: git push origin "refs/tags/${{ needs.resolve.outputs.tag }}"
+
+  pypi:
+    name: Publish the tested Python artifacts to PyPI
+    needs:
+      - resolve
+      - tag
+
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
+
+      - name: Publish to PyPI with trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create the GitHub Release
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Download the published artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
+
+      - name: Render release notes with Commitizen
+        run: uv run --locked nox -s release-notes -- "${{ github.ref_name }}" release-notes.md
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --verify-tag --title "${{ github.ref_name }}" --notes-file release-notes.md dist/*

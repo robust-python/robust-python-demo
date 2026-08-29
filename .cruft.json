@@ -1,6 +1,6 @@
 {
   "template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-  "commit": "e3e4bd38305f544bffe1025111aa2981f1e51714",
+  "commit": "4ae5c6e9c3027d3c9bcf48aa20f1519b37f394f7",
   "checkout": null,
   "context": {
     "cookiecutter": {
@@ -10,17 +10,22 @@
       "min_python_version": "3.10",
       "max_python_version": "3.14",
       "add_rust_extension": false,
+      "rust_project_name": "robust-python-demo-core",
+      "rust_package_name": "robust_python_demo_core",
+      "rust_version": "1.83",
+      "rust_python_abi": "abi3",
+      "publish_rust_package": false,
       "author": "Kyle Oliver",
       "email": "56kyleoliver+cookiecutter-robust-python@gmail.com",
       "repository_provider": "github",
       "repository_host": "github.com",
-      "repository_path": "56kyle/robust-python-demo",
+      "repository_path": "robust-python/robust-python-demo",
       "version": "0.0.0",
       "copyright_year": "2025",
       "license": "MIT",
       "development_status": "Development Status :: 1 - Planning",
       "_template": "C:\\Users\\56kyl\\source\\repos\\cookiecutter-robust-python",
-      "_commit": "e3e4bd38305f544bffe1025111aa2981f1e51714",
+      "_commit": "4ae5c6e9c3027d3c9bcf48aa20f1519b37f394f7",
       "_min_python_version_minor_int": 10,
       "_max_python_version_minor_int": 14,
       "python_versions": [

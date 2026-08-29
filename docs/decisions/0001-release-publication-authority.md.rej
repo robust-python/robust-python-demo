@@ -1,0 +1,9 @@
+diff a/docs/decisions/0001-release-publication-authority.md b/docs/decisions/0001-release-publication-authority.md	(rejected hunks)
+@@ -1,6 +1,6 @@
+ # Release publication authority
+ 
+-- Status: accepted
++- Status: superseded by [ADR 0003](0003-provider-neutral-tag-releases.md)
+ - Date: 2026-08-28
+ - Decision makers: project maintainers
+ - Consulted: contributors

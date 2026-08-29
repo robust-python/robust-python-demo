@@ -1,0 +1,59 @@
+name: Release Build
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit to build
+        required: true
+        type: string
+      artifact-prefix:
+        description: Prefix for uploaded artifact names
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Python distributions
+            runner: ubuntu-latest
+            python: "3.14"
+            artifact-kind: all
+            command: uv run --locked nox -s build-release -- --kind all --out-dir dist
+
+    steps:
+      - name: Check out the exact release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+
+      - name: Build and smoke-test the release artifact
+        run: ${{ matrix.command }}
+
+      - name: Upload the checked artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ strategy.job-index }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

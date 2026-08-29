@@ -1,5 +1,5 @@
 {
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "scripts/release_tools"],
   "exclude": [
     ".venv",
     "venv",
@@ -25,6 +25,8 @@
   },
   "reportMissingImports": true,
   "reportMissingTypeStubs": true,
+  "reportUnusedCallResult": false,
+  "reportUnusedImport": false,
 
   "reportGeneralTypeIssues": "warning",
   "reportPropertyTypeMismatch": "warning",

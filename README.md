@@ -4,7 +4,7 @@ robust_python_demo
 
 ---
 
-**[📚 View Documentation](https://robust-python-demo.readthedocs.io/)** | **[🐛 Report a Bug](https://github.com/56kyle/robust-python-demo/issues)** | **[✨ Request a Feature](https://github.com/56kyle/robust-python-demo/issues)**
+**[📚 View Documentation](https://robust-python-demo.readthedocs.io/)** | **[🐛 Report a Bug](https://github.com/robust-python/robust-python-demo/issues)** | **[✨ Request a Feature](https://github.com/robust-python/robust-python-demo/issues)**
 
 ---
 
@@ -22,7 +22,7 @@ To set up `robust_python_demo` for local development:
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/56kyle/robust-python-demo.git
+    git clone https://github.com/robust-python/robust-python-demo.git
     cd robust-python-demo
     ```
 2.  Install dependencies using [:term:`uv`](uv-documentation):
@@ -73,11 +73,13 @@ This project uses a robust set of tools for development, testing, and quality as
 
 Explore the `noxfile.py` and the project documentation for detailed information on the automated workflow.
 
+Maintainers use the [release procedure](docs/releasing.md) to prepare version and changelog changes with Commitizen, validate the artifacts locally or in CI, and publish from an annotated release tag. TestPyPI remains available as an optional rehearsal.
+
 ## Contributing
 
 (This section should guide contributions _to this specific generated project_, not the template. It should refer to the project's `CODE_OF_CONDUCT.md` and link to a `CONTRIBUTING.md` specific to the project, if you choose to generate one.)
 
-Report bugs or suggest features via the [issue tracker](https://github.com/56kyle/robust-python-demo/issues).
+Report bugs or suggest features via the [issue tracker](https://github.com/robust-python/robust-python-demo/issues).
 
 See [CONTRIBUTING.md](#) for contribution guidelines.
 
@@ -93,3 +95,6 @@ Distributed under the terms of the **MIT** license. See [LICENSE](LICENSE) for d
 
 [cookiecutter-robust-python]: https://github.com/robust-python/cookiecutter-robust-python
 [documentation]: https://robust-python-demo.readthedocs.io/
+[pip-documentation]: https://pip.pypa.io/en/stable/
+[nox-documentation]: https://nox.thea.codes/en/stable/
+[uv-documentation]: https://docs.astral.sh/uv/

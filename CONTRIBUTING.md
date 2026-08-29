@@ -42,7 +42,7 @@ We welcome pull requests! For significant changes, it's best to open an issue fi
 1. **Fork and clone the repository:**
 
    ```bash
-   git clone https://github.com/56kyle/robust-python-demo.git
+   git clone https://github.com/robust-python/robust-python-demo.git
    cd robust-python-demo
    ```
 
@@ -185,6 +185,10 @@ uvx nox -s build-python     # Build package
 uvx nox -t ci               # All CI checks
 ```
 
+## Maintainer Releases
+
+Maintainers prepare releases locally and publish them through protected GitHub environments. See the [release procedure][release-procedure] before you create a `release/*` branch. Do not publish registry files from a pull-request workflow or a local recovery attempt.
+
 ## Getting Help
 
 - Check existing [issues][issues] and [discussions][discussions]
@@ -202,8 +206,8 @@ _This project was generated from the [cookiecutter-robust-python][cookiecutter-r
 <!-- Reference Links -->
 
 [code-of-conduct]: CODE_OF_CONDUCT.md
-[issues]: https://github.com/56kyle/robust-python-demo/issues
-[discussions]: https://github.com/56kyle/robust-python-demo/discussions
+[issues]: https://github.com/robust-python/robust-python-demo/issues
+[discussions]: https://github.com/robust-python/robust-python-demo/discussions
 [uv-documentation]: https://docs.astral.sh/uv/
 [ruff-documentation]: https://docs.astral.sh/ruff/
 [basedpyright-documentation]: https://github.com/detachhead/basedpyright
@@ -212,3 +216,4 @@ _This project was generated from the [cookiecutter-robust-python][cookiecutter-r
 [conventional-commits]: https://www.conventionalcommits.org/
 [pytest-documentation]: https://docs.pytest.org/
 [cookiecutter-robust-python]: https://github.com/robust-python/cookiecutter-robust-python
+[release-procedure]: docs/releasing.md
